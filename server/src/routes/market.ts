@@ -561,14 +561,20 @@ marketRouter.get("/macro", async (req, res) => {
         // Exact `name`/`symbol` spelling NSE uses isn't verified live from
         // this environment — matched tolerantly so a spelling mismatch just
         // means this index is skipped (falls back to Yahoo below), not a
-        // thrown error.
+        // thrown error. The row's own `symbol` (e.g. "NIFTY 50", NSE's raw
+        // index name) is deliberately NOT used as this app's symbol — only
+        // Yahoo/Nasdaq/Stooq know how to resolve a symbol when a widget
+        // clicks through to Chart/Quote, and none of them recognize NSE's
+        // raw name. The canonical Yahoo-style ticker below is what every
+        // other lookup in this app (and the INDIA_INDEX_PROXIES fallback
+        // just below) already uses for these same three indexes.
         const pick = (matcher: RegExp) => snapshotOrNull.find((r) => matcher.test(r.name) || matcher.test(r.symbol));
-        for (const [row, label] of [
-          [pick(/^nifty\s*50$/i), "NIFTY 50"],
-          [pick(/nifty\s*bank/i), "NIFTY BANK"],
-          [pick(/india\s*vix/i), "India VIX"],
+        for (const [row, symbol, label] of [
+          [pick(/^nifty\s*50$/i), "^NSEI", "NIFTY 50"],
+          [pick(/nifty\s*bank/i), "^NSEBANK", "NIFTY BANK"],
+          [pick(/india\s*vix/i), "^INDIAVIX", "India VIX"],
         ] as const) {
-          if (row) niftyFamily.push({ symbol: row.symbol, label, price: row.last, changePercent: row.changePercent });
+          if (row) niftyFamily.push({ symbol, label, price: row.last, changePercent: row.changePercent });
         }
       }
 
