@@ -29,12 +29,12 @@ function Clock({ tz, label }: { tz: string; label: string }) {
   );
 }
 
-function marketStateNY(): { label: string; open: boolean } {
-  const ny = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = ny.getDay();
-  const mins = ny.getHours() * 60 + ny.getMinutes();
-  const open = day >= 1 && day <= 5 && mins >= 570 && mins < 960; // 09:30–16:00
-  return { label: open ? "NYSE OPEN" : "NYSE CLOSED", open };
+function marketStateNSE(): { label: string; open: boolean } {
+  const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const day = ist.getDay();
+  const mins = ist.getHours() * 60 + ist.getMinutes();
+  const open = day >= 1 && day <= 5 && mins >= 555 && mins < 930; // 09:15–15:30 IST
+  return { label: open ? "NSE OPEN" : "NSE CLOSED", open };
 }
 
 export default function TopBar() {
@@ -46,15 +46,15 @@ export default function TopBar() {
     refetchInterval: 30_000,
   });
 
-  const market = marketStateNY();
+  const market = marketStateNSE();
   const healthy = status?.providers.filter((p) => p.ok > 0) ?? [];
 
   return (
     <header className="flex items-center gap-4 px-3 h-8 bg-[var(--panel-2)] border-b border-[var(--border)] text-[11px] shrink-0">
       <span className="amber font-bold tracking-widest">OPENTERMINAL</span>
       <span className={market.open ? "up" : "down"}>● {market.label}</span>
+      <Clock tz="Asia/Kolkata" label="IST" />
       <Clock tz="America/New_York" label="NY" />
-      <Clock tz="Europe/Rome" label="MIL" />
       <Clock tz="Europe/London" label="LDN" />
       <Clock tz="Asia/Tokyo" label="TYO" />
       <button

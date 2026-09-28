@@ -19,6 +19,25 @@ export function toTVExchange(exchange: string | null): string {
   return "NASDAQ";
 }
 
+/** A .NS/.BO-suffixed symbol is NSE/BSE-listed under this app's symbol convention. */
+function isIndianSuffixed(symbol: string): boolean {
+  return /\.(NS|BO)$/i.test(symbol);
+}
+
+/**
+ * TradingView scanner region + ticker for a quote, so fundamentals lookups
+ * route Indian symbols to the "india" scan (NSE:RELIANCE) instead of the
+ * US-only "america" scan the exchange-label mapping above targets.
+ */
+function tvRegionTicker(symbol: string, exchange: string | null): { region: string; ticker: string } {
+  if (isIndianSuffixed(symbol)) {
+    const bare = symbol.replace(/\.(NS|BO)$/i, "");
+    const ex = /\.BO$/i.test(symbol) ? "BSE" : "NSE";
+    return { region: "india", ticker: `${ex}:${bare}` };
+  }
+  return { region: "america", ticker: `${toTVExchange(exchange)}:${symbol}` };
+}
+
 export type Fundamentals = {
   open: number | null;
   pe: number | null;
@@ -42,34 +61,52 @@ const COLUMNS = [
  * single request. Returns a map keyed by the plain symbol (not the
  * "EXCHANGE:SYMBOL" ticker) so callers can merge by symbol directly.
  */
+/**
+ * Batch-fetch fundamentals for a list of {symbol, exchange} pairs, one
+ * request per TradingView scanner region involved (usually just "america",
+ * plus "india" once any .NS/.BO symbol is in the batch). A failure fetching
+ * one region's batch doesn't drop the others — this is enrichment only,
+ * callers already treat a missing entry as "no fundamentals available".
+ */
 export async function scanFundamentals(
   entries: Array<{ symbol: string; exchange: string | null }>
 ): Promise<Map<string, Fundamentals>> {
-  const tickers = entries.map((e) => `${toTVExchange(e.exchange)}:${e.symbol}`);
   const out = new Map<string, Fundamentals>();
-  if (tickers.length === 0) return out;
+  if (entries.length === 0) return out;
 
-  const res = await fetch("https://scanner.tradingview.com/america/scan", {
-    method: "POST",
-    headers: HEADERS,
-    body: JSON.stringify({ symbols: { tickers }, columns: COLUMNS }),
-  });
-  if (!res.ok) throw new Error(`tradingview scan ${res.status}`);
-  const json = await res.json();
-  const rows: Array<{ s: string; d: (number | null)[] }> = json?.data ?? [];
-
-  for (const row of rows) {
-    const symbol = row.s.split(":")[1];
-    const [open, pe, eps, divYield, beta, shares] = row.d;
-    out.set(symbol, {
-      open: open ?? null,
-      pe: pe ?? null,
-      eps: eps ?? null,
-      dividendYield: divYield !== null && divYield !== undefined ? divYield / 100 : null,
-      beta: beta ?? null,
-      sharesOutstanding: shares ?? null,
-    });
+  const byRegion = new Map<string, string[]>();
+  const symbolForTicker = new Map<string, string>();
+  for (const e of entries) {
+    const { region, ticker } = tvRegionTicker(e.symbol, e.exchange);
+    if (!byRegion.has(region)) byRegion.set(region, []);
+    byRegion.get(region)!.push(ticker);
+    symbolForTicker.set(ticker, e.symbol);
   }
+
+  await Promise.all(
+    [...byRegion.entries()].map(async ([region, tickers]) => {
+      const res = await fetch(`https://scanner.tradingview.com/${region}/scan`, {
+        method: "POST",
+        headers: HEADERS,
+        body: JSON.stringify({ symbols: { tickers }, columns: COLUMNS }),
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const rows: Array<{ s: string; d: (number | null)[] }> = json?.data ?? [];
+      for (const row of rows) {
+        const symbol = symbolForTicker.get(row.s) ?? row.s.split(":")[1];
+        const [open, pe, eps, divYield, beta, shares] = row.d;
+        out.set(symbol, {
+          open: open ?? null,
+          pe: pe ?? null,
+          eps: eps ?? null,
+          dividendYield: divYield !== null && divYield !== undefined ? divYield / 100 : null,
+          beta: beta ?? null,
+          sharesOutstanding: shares ?? null,
+        });
+      }
+    })
+  );
   return out;
 }
 
@@ -199,6 +236,49 @@ export async function europeMarketScan(limit = 1500): Promise<MarketRow[]> {
   return rows.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, limit);
 }
 
+/**
+ * Live top-N-by-market-cap snapshot of the Indian equity market, same shape
+ * as marketScan()/europeMarketScan(). Filtered to NSE as the primary listing
+ * venue so BSE cross-listings of the same company don't show up twice (the
+ * same reasoning as the OTC filter in marketScan() above). Market cap here
+ * is already INR — no FX normalization needed, unlike the merged EU scan.
+ */
+export async function indiaMarketScan(limit = 1500): Promise<MarketRow[]> {
+  const res = await fetch("https://scanner.tradingview.com/india/scan", {
+    method: "POST",
+    headers: HEADERS,
+    body: JSON.stringify({
+      columns: ["description", "close", "change", "market_cap_basic", "sector", "volume", "exchange"],
+      filter: [
+        { left: "type", operation: "equal", right: "stock" },
+        { left: "typespecs", operation: "has", right: ["common"] },
+        { left: "exchange", operation: "equal", right: "NSE" },
+      ],
+      sort: { sortBy: "market_cap_basic", sortOrder: "desc" },
+      range: [0, limit],
+    }),
+  });
+  if (!res.ok) throw new Error(`tradingview scan india ${res.status}`);
+  const json = await res.json();
+  const rows: Array<{ s: string; d: any[] }> = json?.data ?? [];
+  return rows
+    .map((r) => {
+      const [name, close, change, marketCap, sector, volume, exchange] = r.d;
+      return {
+        symbol: r.s.split(":")[1],
+        name: name ?? r.s.split(":")[1],
+        price: close ?? null,
+        changePercent: change ?? null,
+        marketCap: marketCap ?? null,
+        sector: sector || "Other",
+        volume: volume ?? null,
+        exchange: exchange ?? "",
+        currency: "INR",
+      };
+    })
+    .filter((r) => r.symbol);
+}
+
 export type EarningsInfo = {
   symbol: string;
   nextEarningsDate: number | null; // unix seconds
@@ -209,30 +289,48 @@ export type EarningsInfo = {
 const EARNINGS_COLUMNS = ["earnings_release_next_date", "earnings_release_date", "earnings_per_share_forecast_next_fq"];
 
 /**
- * Next/last earnings date + forward EPS estimate for a batch of US symbols.
- * We don't know each symbol's exchange up front, so every symbol is queried
- * under NASDAQ/NYSE/AMEX at once in a single request — TradingView just drops
- * whichever prefixes don't match, so exactly one row comes back per symbol.
+ * Next/last earnings date + forward EPS estimate for a batch of symbols. We
+ * don't know each US symbol's exchange up front, so every US symbol is
+ * queried under NASDAQ/NYSE/AMEX at once in the "america" scan — TradingView
+ * just drops whichever prefixes don't match, so exactly one row comes back
+ * per symbol. .NS/.BO-suffixed symbols are queried the same way against the
+ * "india" scan under NSE/BSE instead, in a separate request.
  */
 export async function earningsCalendar(symbols: string[]): Promise<EarningsInfo[]> {
-  const exchanges = ["NASDAQ", "NYSE", "AMEX"];
-  const tickers = symbols.flatMap((s) => exchanges.map((ex) => `${ex}:${s}`));
-  const res = await fetch("https://scanner.tradingview.com/america/scan", {
-    method: "POST",
-    headers: HEADERS,
-    body: JSON.stringify({ symbols: { tickers }, columns: EARNINGS_COLUMNS }),
-  });
-  if (!res.ok) throw new Error(`tradingview scan ${res.status}`);
-  const json = await res.json();
-  const rows: Array<{ s: string; d: (number | null)[] }> = json?.data ?? [];
-
   const bySymbol = new Map<string, EarningsInfo>();
-  for (const row of rows) {
-    const symbol = row.s.split(":")[1];
-    if (bySymbol.has(symbol)) continue;
-    const [nextEarningsDate, lastEarningsDate, epsForecast] = row.d;
-    bySymbol.set(symbol, { symbol, nextEarningsDate, lastEarningsDate, epsForecast });
+
+  async function queryRegion(region: string, tickerToSymbol: Map<string, string>) {
+    const tickers = [...tickerToSymbol.keys()];
+    if (tickers.length === 0) return;
+    const res = await fetch(`https://scanner.tradingview.com/${region}/scan`, {
+      method: "POST",
+      headers: HEADERS,
+      body: JSON.stringify({ symbols: { tickers }, columns: EARNINGS_COLUMNS }),
+    });
+    if (!res.ok) return;
+    const json = await res.json();
+    const rows: Array<{ s: string; d: (number | null)[] }> = json?.data ?? [];
+    for (const row of rows) {
+      const symbol = tickerToSymbol.get(row.s);
+      if (!symbol || bySymbol.has(symbol)) continue;
+      const [nextEarningsDate, lastEarningsDate, epsForecast] = row.d;
+      bySymbol.set(symbol, { symbol, nextEarningsDate, lastEarningsDate, epsForecast });
+    }
   }
+
+  const usTickers = new Map<string, string>();
+  const inTickers = new Map<string, string>();
+  for (const s of symbols) {
+    if (isIndianSuffixed(s)) {
+      const bare = s.replace(/\.(NS|BO)$/i, "");
+      for (const ex of ["NSE", "BSE"]) inTickers.set(`${ex}:${bare}`, s);
+    } else {
+      for (const ex of ["NASDAQ", "NYSE", "AMEX"]) usTickers.set(`${ex}:${s}`, s);
+    }
+  }
+
+  await Promise.all([queryRegion("america", usTickers), queryRegion("india", inTickers)]);
+
   return symbols.map((s) => bySymbol.get(s) ?? { symbol: s, nextEarningsDate: null, lastEarningsDate: null, epsForecast: null });
 }
 
@@ -274,7 +372,7 @@ function yahooSuffixFor(exchange: string): string {
 export async function search(query: string): Promise<SearchResult[]> {
   const url = `https://symbol-search.tradingview.com/symbol_search/v3/?text=${encodeURIComponent(
     query
-  )}&hl=1&lang=en&search_type=undefined&domain=production&sort_by_country=US`;
+  )}&hl=1&lang=en&search_type=undefined&domain=production&sort_by_country=IN`;
   const res = await fetch(url, { headers: HEADERS });
   if (!res.ok) throw new Error(`tradingview search ${res.status}`);
   const json = await res.json();

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiGet, apiPost, apiDelete, fmt, pctClass, type Quote } from "../../lib/api";
+import { apiGet, apiPost, apiDelete, fmt, fmtPrice, isIndianSymbol, pctClass, type Quote } from "../../lib/api";
 
 type Portfolio = { id: number; name: string };
 type Position = { symbol: string; quantity: number; avgCost: number; realizedPnl: number };
@@ -112,6 +112,7 @@ export default function PortfolioWidget() {
           <tbody>
             {positions.map((p) => {
               const q = quotes.find((x) => x.symbol === p.symbol);
+              const currency = q?.currency ?? (isIndianSymbol(p.symbol) ? "INR" : null);
               const last = q?.price ?? null;
               const mv = last !== null ? last * p.quantity : null;
               const upnl = last !== null ? (last - p.avgCost) * p.quantity : null;
@@ -119,11 +120,11 @@ export default function PortfolioWidget() {
                 <tr key={p.symbol}>
                   <td className="font-bold">{p.symbol}</td>
                   <td>{fmt(p.quantity, 4)}</td>
-                  <td>{fmt(p.avgCost)}</td>
-                  <td>{fmt(last)}</td>
-                  <td>{fmt(mv)}</td>
-                  <td className={pctClass(upnl)}>{fmt(upnl)}</td>
-                  <td className={pctClass(p.realizedPnl)}>{fmt(p.realizedPnl)}</td>
+                  <td>{fmtPrice(p.avgCost, currency)}</td>
+                  <td>{fmtPrice(last, currency)}</td>
+                  <td>{fmtPrice(mv, currency)}</td>
+                  <td className={pctClass(upnl)}>{fmtPrice(upnl, currency)}</td>
+                  <td className={pctClass(p.realizedPnl)}>{fmtPrice(p.realizedPnl, currency)}</td>
                 </tr>
               );
             })}
@@ -141,7 +142,7 @@ export default function PortfolioWidget() {
                 <td className="font-bold">{t.symbol}</td>
                 <td className={t.side === "BUY" ? "up" : "down"}>{t.side}</td>
                 <td>{fmt(t.quantity, 4)}</td>
-                <td>{fmt(t.price)}</td>
+                <td>{fmtPrice(t.price, isIndianSymbol(t.symbol) ? "INR" : null)}</td>
                 <td>
                   <button
                     className="dim hover:text-[var(--down)]"

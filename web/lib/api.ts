@@ -76,3 +76,50 @@ export function pctClass(n: number | null | undefined): string {
   if (n === null || n === undefined) return "dim";
   return n >= 0 ? "up" : "down";
 }
+
+// ---- India-tuned formatting: Indian digit grouping (12,34,567) and
+// Lakh/Crore magnitude suffixes, used for INR-denominated quotes alongside
+// the existing US-style fmt/fmtBig used for USD ones. ----
+
+export function fmtINR(n: number | null | undefined, digits = 2): string {
+  if (n === null || n === undefined || !isFinite(n)) return "—";
+  return n.toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/** Lakh/Crore-suffixed magnitude, Indian convention (1 Cr = 1e7, 1 L = 1e5). */
+export function fmtBigINR(n: number | null | undefined): string {
+  if (n === null || n === undefined || !isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1e7) return (n / 1e7).toFixed(2) + " Cr";
+  if (abs >= 1e5) return (n / 1e5).toFixed(2) + " L";
+  if (abs >= 1e3) return n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  return String(n);
+}
+
+const CURRENCY_SYMBOL: Record<string, string> = { USD: "$", INR: "₹", EUR: "€", GBP: "£", JPY: "¥" };
+
+export function currencySymbol(currency?: string | null): string {
+  return CURRENCY_SYMBOL[currency ?? ""] ?? "";
+}
+
+/** A .NS/.BO-suffixed symbol is NSE/BSE-listed (INR) under this app's symbol convention. */
+export function isIndianSymbol(symbol: string): boolean {
+  return /\.(NS|BO)$/i.test(symbol);
+}
+
+/** A per-share/index price, currency-prefixed and grouped per the quote's own currency. */
+export function fmtPrice(n: number | null | undefined, currency?: string | null, digits = 2): string {
+  const val = currency === "INR" ? fmtINR(n, digits) : fmt(n, digits);
+  return val === "—" ? val : `${currencySymbol(currency)}${val}`;
+}
+
+/** A large money amount (market cap, position value), currency-prefixed with the right magnitude suffix. */
+export function fmtMoney(n: number | null | undefined, currency?: string | null): string {
+  const val = currency === "INR" ? fmtBigINR(n) : fmtBig(n);
+  return val === "—" ? val : `${currencySymbol(currency)}${val}`;
+}
+
+/** A plain count (volume, shares outstanding) — no currency symbol, but still Cr/L-scaled for INR quotes. */
+export function fmtCount(n: number | null | undefined, currency?: string | null): string {
+  return currency === "INR" ? fmtBigINR(n) : fmtBig(n);
+}

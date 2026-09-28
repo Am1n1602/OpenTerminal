@@ -4,7 +4,7 @@
 
 **A Terminal‑style workspace for the rest of us — built entirely on free, public market data.**
 
-Dark. Dense. Keyboard‑driven. Zero paid API keys, zero subscriptions.
+Dark. Dense. Keyboard‑driven. Zero paid API keys, zero subscriptions. Tuned for the **Indian stock market** (NSE/BSE) by default, with US and European markets a tab away.
 
 [![Stack](https://img.shields.io/badge/stack-Next.js%20%2B%20Express%20%2B%20TypeScript-orange)](#tech-stack)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
@@ -40,11 +40,11 @@ No signup. No credit card. No rate‑limited demo tier. Clone it, `npm install`,
 - 📈 **Professional charting** (via [`lightweight-charts`](https://github.com/tradingview/lightweight-charts)) — candlesticks, bars, line, area, volume, 8 timeframes (1D → MAX), and SMA / EMA / VWAP / Bollinger Bands / RSI / MACD indicators, each with a live hover legend showing OHLC, volume, and every active indicator's value under your cursor
 - 💹 **Quote panel** — last / bid / ask / OHLC, volume, market cap, P/E, EPS, dividend yield, 52‑week range, beta, shares outstanding
 - 📰 **News feed** — aggregated and de‑duplicated from multiple RSS sources, per‑symbol or global
-- 🔎 **Full‑market screener** — filter by sector, market cap, % change, and volume across the entire US equity market, sortable on every column
-- 🗺️ **Live sector heatmap** — treemap sized by market cap, colored by daily % change, refreshing every few seconds
+- 🔎 **Full‑market screener** — filter by sector, market cap, % change, and volume across NSE (default), the entire US equity market, or Europe's largest exchanges, sortable on every column
+- 🗺️ **Live sector heatmap** — treemap sized by market cap, colored by daily % change, refreshing every few seconds, for NSE/US/Europe
 - ⛓️ **Options chain** — calls and puts side‑by‑side with strike, bid/ask, volume, open interest, and ITM highlighting
 - 🪙 **Crypto board** — top assets with 7‑day sparklines, BTC/ETH dominance, and full OHLCV charting for any listed coin
-- 🏦 **Macro dashboard** — live US Treasury yield curve, VIX, and major index/commodity proxies
+- 🏦 **Macro dashboard** — NIFTY 50 / NIFTY BANK / SENSEX / India VIX by default, plus US Treasury yield curve & VIX and Euro area yields as secondary tabs
 - 💼 **Portfolio tracker** — log buy/sell transactions, track average cost, realized & unrealized P&L (persisted in SQLite)
 - 📅 **Calendar** — economic events (Fed, ECB, CPI, NFP and more) with consensus forecast, previous reading and, for the major US/EU releases, the actual outcome; plus a per‑watchlist earnings calendar with click‑through history showing forecast vs. actual EPS for the last several quarters and the stock's next‑day price move
 - 🤖 **AI assistant** (optional) — ask questions about the symbol you're looking at, powered by Claude, fully context‑aware of the terminal's current data
@@ -93,20 +93,22 @@ No paid API, no keys, and no single point of failure — every endpoint has a fa
 
 | Data | Primary source | Fallback |
 |---|---|---|
-| Quotes (stocks/ETFs) | Nasdaq public quote API | Yahoo Finance → Stooq |
-| Fundamentals (P/E, EPS, beta, div yield) | TradingView scanner API | — |
-| Historical candles | Nasdaq chart API | Yahoo Finance → Stooq |
-| Symbol search | TradingView symbol search | Yahoo Finance |
-| Full‑market screener / heatmap | TradingView scanner API (live, whole US market) | — |
-| Options chain | Nasdaq option‑chain API | Yahoo Finance |
-| News | Yahoo Finance RSS | Google News RSS |
+| Quotes — US (stocks/ETFs) | Nasdaq public quote API | Yahoo Finance → Stooq |
+| Quotes — NSE/BSE (`.NS`/`.BO` symbols) | Yahoo Finance | TradingView scanner (fundamentals only) |
+| Fundamentals (P/E, EPS, beta, div yield) | TradingView scanner API (`america` scan for US, `india` scan for NSE/BSE) | — |
+| Historical candles | Nasdaq chart API (US) / Yahoo Finance chart (`.NS`/`.BO`) | Yahoo Finance → Stooq |
+| Symbol search | TradingView symbol search (sorted India‑first) | Yahoo Finance |
+| Full‑market screener / heatmap | TradingView scanner API — NSE by default, whole‑US or major‑Europe scans a tab away | — |
+| Options chain | Nasdaq option‑chain API (US symbols only for now — see [Roadmap](#-roadmap)) | Yahoo Finance |
+| News | Yahoo Finance RSS + Google News RSS, region‑biased to India for `.NS`/`.BO` symbols | — |
 | Crypto quotes & board | CoinGecko | Binance public API |
 | Crypto candles | Binance public API (klines) | — |
-| Macro (Treasury yields, VIX) | FRED (Federal Reserve) | — |
-| Economic calendar (schedule, forecast, previous) | Forex Factory public feed | — |
+| Macro — India (NIFTY 50 / NIFTY BANK / SENSEX / India VIX) | Yahoo Finance index quotes | — |
+| Macro — US (Treasury yields, VIX) / EU (yields, ECB rate, HICP) | FRED (Federal Reserve) / ECB | — |
+| Economic calendar (schedule, forecast, previous — incl. RBI/India events) | Forex Factory public feed | — |
 | Economic calendar (actual — Fed / ECB / CPI / NFP only) | FRED (Federal Reserve) | — |
-| Earnings calendar (next/last date, EPS estimate) | TradingView scanner API | — |
-| Earnings history (forecast vs. actual, surprise %) | Nasdaq earnings‑surprise API | — |
+| Earnings calendar (next/last date, EPS estimate) | TradingView scanner API (`india` scan for NSE/BSE symbols) | — |
+| Earnings history (forecast vs. actual, surprise %) | Nasdaq earnings‑surprise API (US symbols only — no NSE equivalent found yet) | — |
 
 > ⚠️ These are public endpoints, not officially licensed data feeds — treat prices as delayed/indicative, not execution‑grade. See [`server/src/providers/`](server/src/providers) — each provider is a small, isolated module, so swapping or adding a data source is a 30‑minute job.
 
@@ -188,6 +190,14 @@ Run tests with `npm test` (Vitest, no network calls). CI runs on every push — 
 
 ## 🗺️ Roadmap
 
+**India data layer (in progress)**
+- [ ] NSE index options chain (NIFTY/BANKNIFTY/FINNIFTY) via [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs)
+- [ ] NSE bulk/block/short deals as the short‑volume widget's India equivalent, also via `jugaad-rpc`
+- [ ] SEBI insider‑trading‑disclosure equivalent for the Insider widget (needs a confirmed NSE endpoint first)
+- [ ] RBI G‑Sec yield curve for the Macro widget (no free daily source confirmed yet)
+- [ ] NSE‑equivalent of forecast‑vs‑actual earnings history
+
+**General**
 - [ ] Chart drawing tools & multi‑asset comparison overlay
 - [ ] Black‑Scholes Greeks on the options chain
 - [ ] Price alerts with desktop notifications

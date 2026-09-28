@@ -29,13 +29,16 @@ async function fetchRss(url: string, publisher: string, symbol: string | null): 
     }));
 }
 
-export async function symbolNews(symbol: string): Promise<NewsItem[]> {
-  const url = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(symbol)}&region=US&lang=en-US`;
+export async function symbolNews(symbol: string, region: "US" | "IN" = "US"): Promise<NewsItem[]> {
+  const lang = region === "IN" ? "en-IN" : "en-US";
+  const url = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(symbol)}&region=${region}&lang=${lang}`;
   return fetchRss(url, "Yahoo Finance", symbol);
 }
 
-export async function topNews(query = "stock market"): Promise<NewsItem[]> {
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+export async function topNews(query = "stock market", region: "US" | "IN" = "US"): Promise<NewsItem[]> {
+  const hl = region === "IN" ? "en-IN" : "en-US";
+  const gl = region === "IN" ? "IN" : "US";
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${gl}:${hl.split("-")[0]}`;
   return fetchRss(url, "Google News", null);
 }
 

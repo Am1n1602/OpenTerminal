@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useMemo, useState } from "react";
-import { apiGet, fmt, pctClass } from "../../lib/api";
+import { apiGet, fmt, fmtPrice, isIndianSymbol, pctClass } from "../../lib/api";
 import { useTerminal } from "../../store/terminal";
 
 type EconEvent = {
@@ -145,6 +145,7 @@ function EarningsHistoryRows({ symbol }: { symbol: string }) {
     queryFn: () => apiGet<EarningsHistoryRow[]>(`/api/earnings-history/${symbol}`),
     staleTime: 3_600_000,
   });
+  const currency = isIndianSymbol(symbol) ? "INR" : null;
 
   if (error) return <div className="p-2 down">Error: {(error as Error).message}</div>;
   if (isLoading) return <div className="p-2 dim">Loading history for {symbol}…</div>;
@@ -167,8 +168,8 @@ function EarningsHistoryRows({ symbol }: { symbol: string }) {
           <tr key={row.dateReported}>
             <td className="!text-left dim">{row.fiscalQtrEnd}</td>
             <td className="!text-left dim">{fmtDate(row.dateReported)}</td>
-            <td className="dim">{row.consensusForecast != null ? `$${row.consensusForecast.toFixed(2)}` : "—"}</td>
-            <td className={surpriseClass(row)}>{row.eps != null ? `$${row.eps.toFixed(2)}` : "—"}</td>
+            <td className="dim">{row.consensusForecast != null ? fmtPrice(row.consensusForecast, currency) : "—"}</td>
+            <td className={surpriseClass(row)}>{row.eps != null ? fmtPrice(row.eps, currency) : "—"}</td>
             <td className={surpriseClass(row)}>{row.surprisePercent != null ? `${fmt(row.surprisePercent, 1)}%` : "—"}</td>
             <td className={pctClass(row.dayAfterChangePercent)}>
               {row.dayAfterChangePercent != null ? `${fmt(row.dayAfterChangePercent, 1)}%` : "—"}
@@ -226,7 +227,7 @@ function EarningsTab() {
               <td className="!text-left text-[var(--text)] font-bold underline decoration-1">{e.symbol}</td>
               <td className="dim">{fmtDate(e.lastEarningsDate)}</td>
               <td className="amber">{fmtDate(e.nextEarningsDate)}</td>
-              <td>{e.epsForecast != null ? `$${e.epsForecast.toFixed(2)}` : "—"}</td>
+              <td>{e.epsForecast != null ? fmtPrice(e.epsForecast, isIndianSymbol(e.symbol) ? "INR" : null) : "—"}</td>
             </tr>
             {expanded === e.symbol && (
               <tr>

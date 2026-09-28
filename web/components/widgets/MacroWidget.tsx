@@ -17,7 +17,7 @@ type MacroData = {
 
 export default function MacroWidget() {
   const setActiveSymbol = useTerminal((s) => s.setActiveSymbol);
-  const [region, setRegion] = useState<"us" | "eu">("us");
+  const [region, setRegion] = useState<"in" | "us" | "eu">("in");
   const { data, error } = useQuery({
     queryKey: ["macro", region],
     queryFn: () => apiGet<MacroData>(`/api/macro?region=${region}`),
@@ -27,7 +27,7 @@ export default function MacroWidget() {
   return (
     <div>
       <div className="flex gap-1 p-1">
-        {(["us", "eu"] as const).map((r) => (
+        {(["in", "us", "eu"] as const).map((r) => (
           <button key={r} className={`term-btn ${region === r ? "active" : ""}`} onClick={() => setRegion(r)}>
             {r.toUpperCase()}
           </button>
@@ -50,13 +50,15 @@ function MacroBody({
   setActiveSymbol,
 }: {
   data: MacroData;
-  region: "us" | "eu";
+  region: "in" | "us" | "eu";
   setActiveSymbol: (s: string) => void;
 }) {
   return (
     <div>
       <div className="px-2 py-1 dim text-[10px] uppercase flex justify-between">
-        <span>{region === "eu" ? "Euro Area AAA Yield Curve" : "US Treasury Yield Curve"}</span>
+        <span>
+          {region === "eu" ? "Euro Area AAA Yield Curve" : region === "in" ? "India Indices" : "US Treasury Yield Curve"}
+        </span>
         {region === "us" && data.vix !== null && (
           <span className="cursor-pointer" onClick={() => setActiveSymbol("^VIX")}>
             VIX <Flash value={data.vix} className="amber">{fmt(data.vix, 2)}</Flash>
