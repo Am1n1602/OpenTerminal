@@ -338,6 +338,20 @@ marketRouter.get("/quotes", async (req, res) => {
 
 // ---- history / candles ----
 
+// withFallback only advances to the next provider on a *thrown* error — a
+// provider that resolves successfully with zero rows (e.g. jugaad-rpc's
+// index-history RPC given a name it doesn't recognize, like BSE's "SENSEX"
+// against NSE-only niftyindices.com) looks like a success and stops the
+// chain right there, never reaching Yahoo/Stooq. Wrapping each attempt to
+// throw on an empty result is what actually makes the fallback chain work.
+function nonEmpty<T extends unknown[]>(fn: () => Promise<T>): () => Promise<T> {
+  return async () => {
+    const rows = await fn();
+    if (!Array.isArray(rows) || rows.length === 0) throw new Error("empty result");
+    return rows;
+  };
+}
+
 marketRouter.get("/history/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const rangeKey = String(req.query.range ?? "6M");
@@ -349,22 +363,22 @@ marketRouter.get("/history/:symbol", async (req, res) => {
         ? vixHistory(rangeKey)
         : isIndianSymbol(symbol)
         ? withFallback([
-            ["jugaad", () => jugaad.history(symbol, rangeKey)],
-            ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
+            ["jugaad", nonEmpty(() => jugaad.history(symbol, rangeKey))],
+            ["yahoo", nonEmpty(() => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval))],
           ])
         : INDIA_INDEX_PROXIES[symbol]
         ? withFallback([
-            ["jugaad", () => jugaad.indexHistory(INDIA_INDEX_PROXIES[symbol], rangeKey)],
-            ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
+            ["jugaad", nonEmpty(() => jugaad.indexHistory(INDIA_INDEX_PROXIES[symbol], rangeKey))],
+            ["yahoo", nonEmpty(() => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval))],
             // Last resort for SENSEX (jugaad has no BSE data, so it only ever
             // reaches this point) — best-effort, Stooq's Indian index coverage
             // isn't confirmed, but it costs nothing to try.
-            ["stooq", () => stooq.history(symbol)],
+            ["stooq", nonEmpty(() => stooq.history(symbol))],
           ])
         : withFallback([
-            ["nasdaq", () => nasdaq.history(symbol, rangeKey)],
-            ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
-            ["stooq", () => stooq.history(symbol)],
+            ["nasdaq", nonEmpty(() => nasdaq.history(symbol, rangeKey))],
+            ["yahoo", nonEmpty(() => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval))],
+            ["stooq", nonEmpty(() => stooq.history(symbol))],
           ])
     );
     if (!Array.isArray(data) || data.length === 0) throw new Error("empty history from all providers");
