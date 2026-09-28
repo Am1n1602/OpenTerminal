@@ -334,6 +334,45 @@ export async function earningsCalendar(symbols: string[]): Promise<EarningsInfo[
   return symbols.map((s) => bySymbol.get(s) ?? { symbol: s, nextEarningsDate: null, lastEarningsDate: null, epsForecast: null });
 }
 
+export type IndexQuote = {
+  price: number | null;
+  changePercent: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  volume: number | null;
+};
+
+/**
+ * Direct quote for one exact "EXCHANGE:TICKER" TradingView symbol (e.g.
+ * "BSE:SENSEX"), via the same scanner tickers-mode already used above for
+ * fundamentals/earnings lookups. Unlike search(), this isn't filtered to
+ * `type in ["stock","fund","dr"]`, so it also resolves indices that
+ * TradingView's own symbol search excludes — this is how SENSEX gets a
+ * quote independent of Yahoo, which is otherwise its only source since
+ * jugaad-rpc's NSE-only scope doesn't cover BSE.
+ */
+export async function indexQuote(region: string, ticker: string): Promise<IndexQuote> {
+  const res = await fetch(`https://scanner.tradingview.com/${region}/scan`, {
+    method: "POST",
+    headers: HEADERS,
+    body: JSON.stringify({ symbols: { tickers: [ticker] }, columns: ["close", "change", "open", "high", "low", "volume"] }),
+  });
+  if (!res.ok) throw new Error(`tradingview scan ${ticker} ${res.status}`);
+  const json = await res.json();
+  const row = (json?.data ?? [])[0];
+  if (!row) throw new Error(`tradingview: no data for ${ticker}`);
+  const [close, change, open, high, low, volume] = row.d;
+  return {
+    price: close ?? null,
+    changePercent: change ?? null,
+    open: open ?? null,
+    high: high ?? null,
+    low: low ?? null,
+    volume: volume ?? null,
+  };
+}
+
 export type SearchResult = { symbol: string; name: string; exchange: string; type: string };
 
 // Non-US exchanges we can serve via Yahoo Finance (our international fallback —

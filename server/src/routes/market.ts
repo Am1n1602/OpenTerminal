@@ -166,9 +166,9 @@ async function getQuotes(symbols: string[]): Promise<yahoo.Quote[]> {
   // NIFTY 50 / NIFTY BANK / India VIX aren't NSE equities (no bare-symbol
   // quote RPC covers them) but jugaad-rpc's live index snapshot does — the
   // same feed the Macro widget uses. This is what makes these tickers
-  // resolvable at all when Yahoo can't be reached (Yahoo is otherwise the
-  // only other source for index tickers, and doesn't carry SENSEX/BSE data
-  // regardless, which is why that one still depends on Yahoo below).
+  // resolvable at all when Yahoo can't be reached. SENSEX isn't in this
+  // snapshot (jugaad-rpc's scope is NSE-only, and SENSEX is BSE's own
+  // index) so it falls through to the TradingView-based fallback below.
   const indiaIndexSymbols = remaining.filter((s) => INDIA_INDEX_PROXIES[s]);
   if (indiaIndexSymbols.length > 0) {
     try {
@@ -209,7 +209,47 @@ async function getQuotes(symbols: string[]): Promise<yahoo.Quote[]> {
       remaining = remaining.filter((s) => !fetched.has(s));
     } catch {
       // jugaad-rpc not running / snapshot RPC unavailable — fall through to
-      // the ordinary nasdaq -> yahoo -> stooq chain below (SENSEX's only path)
+      // the TradingView/Yahoo/Stooq chain below
+    }
+  }
+
+  // SENSEX specifically: TradingView's scanner (direct-ticker mode, not its
+  // filtered search box) carries BSE:SENSEX independent of Yahoo, which is
+  // otherwise the only other source for it.
+  if (remaining.includes("^BSESN")) {
+    try {
+      const q = await tradingview.indexQuote("india", "BSE:SENSEX");
+      fetched.set("^BSESN", {
+        symbol: "^BSESN",
+        name: "SENSEX",
+        price: q.price,
+        change: null,
+        changePercent: q.changePercent,
+        open: q.open,
+        high: q.high,
+        low: q.low,
+        previousClose: null,
+        bid: null,
+        ask: null,
+        volume: q.volume,
+        avgVolume: null,
+        marketCap: null,
+        pe: null,
+        eps: null,
+        dividendYield: null,
+        week52High: null,
+        week52Low: null,
+        beta: null,
+        sharesOutstanding: null,
+        currency: "INR",
+        exchange: "BSE",
+        marketState: null,
+        time: null,
+        source: "tradingview",
+      });
+      remaining = remaining.filter((s) => s !== "^BSESN");
+    } catch {
+      // fall through to the ordinary nasdaq -> yahoo -> stooq chain below
     }
   }
 
@@ -316,6 +356,10 @@ marketRouter.get("/history/:symbol", async (req, res) => {
         ? withFallback([
             ["jugaad", () => jugaad.indexHistory(INDIA_INDEX_PROXIES[symbol], rangeKey)],
             ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
+            // Last resort for SENSEX (jugaad has no BSE data, so it only ever
+            // reaches this point) — best-effort, Stooq's Indian index coverage
+            // isn't confirmed, but it costs nothing to try.
+            ["stooq", () => stooq.history(symbol)],
           ])
         : withFallback([
             ["nasdaq", () => nasdaq.history(symbol, rangeKey)],
