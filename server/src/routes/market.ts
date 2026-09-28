@@ -163,6 +163,56 @@ async function getQuotes(symbols: string[]): Promise<yahoo.Quote[]> {
     remaining = remaining.filter((s) => !fetched.has(s));
   }
 
+  // NIFTY 50 / NIFTY BANK / India VIX aren't NSE equities (no bare-symbol
+  // quote RPC covers them) but jugaad-rpc's live index snapshot does — the
+  // same feed the Macro widget uses. This is what makes these tickers
+  // resolvable at all when Yahoo can't be reached (Yahoo is otherwise the
+  // only other source for index tickers, and doesn't carry SENSEX/BSE data
+  // regardless, which is why that one still depends on Yahoo below).
+  const indiaIndexSymbols = remaining.filter((s) => INDIA_INDEX_PROXIES[s]);
+  if (indiaIndexSymbols.length > 0) {
+    try {
+      const rows = await jugaad.indexSnapshot();
+      for (const sym of indiaIndexSymbols) {
+        const name = INDIA_INDEX_PROXIES[sym];
+        const row = rows.find((r) => r.name.toLowerCase() === name.toLowerCase());
+        if (!row) continue;
+        fetched.set(sym, {
+          symbol: sym,
+          name: row.name,
+          price: row.last,
+          change: row.change,
+          changePercent: row.changePercent,
+          open: null,
+          high: null,
+          low: null,
+          previousClose: null,
+          bid: null,
+          ask: null,
+          volume: null,
+          avgVolume: null,
+          marketCap: null,
+          pe: null,
+          eps: null,
+          dividendYield: null,
+          week52High: null,
+          week52Low: null,
+          beta: null,
+          sharesOutstanding: null,
+          currency: "INR",
+          exchange: "NSE",
+          marketState: null,
+          time: null,
+          source: "jugaad-rpc",
+        });
+      }
+      remaining = remaining.filter((s) => !fetched.has(s));
+    } catch {
+      // jugaad-rpc not running / snapshot RPC unavailable — fall through to
+      // the ordinary nasdaq -> yahoo -> stooq chain below (SENSEX's only path)
+    }
+  }
+
   const nasdaqResults = await Promise.allSettled(remaining.map((s) => nasdaq.quote(s)));
   nasdaqResults.forEach((r, i) => {
     if (r.status === "fulfilled") fetched.set(remaining[i], r.value);
@@ -262,6 +312,11 @@ marketRouter.get("/history/:symbol", async (req, res) => {
             ["jugaad", () => jugaad.history(symbol, rangeKey)],
             ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
           ])
+        : INDIA_INDEX_PROXIES[symbol]
+        ? withFallback([
+            ["jugaad", () => jugaad.indexHistory(INDIA_INDEX_PROXIES[symbol], rangeKey)],
+            ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
+          ])
         : withFallback([
             ["nasdaq", () => nasdaq.history(symbol, rangeKey)],
             ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
@@ -310,13 +365,24 @@ marketRouter.get("/search", async (req, res) => {
   if (!q) return res.json([]);
   try {
     const data = await cached(`search:${q.toLowerCase()}`, 300_000, async () => {
-      const results = await withFallback([
-        ["tradingview", () => tradingview.search(q)],
-        ["yahoo", () => yahoo.search(q)],
-      ]);
       const alias = INDEX_ALIASES.find((a) => a.match.test(q));
-      if (alias && !results.some((r) => r.symbol === alias.symbol)) {
-        return [{ symbol: alias.symbol, name: alias.name, exchange: alias.exchange, type: "index" }, ...results];
+      const aliasEntry = alias ? { symbol: alias.symbol, name: alias.name, exchange: alias.exchange, type: "index" } : null;
+      let results: Awaited<ReturnType<typeof tradingview.search>>;
+      try {
+        results = await withFallback([
+          ["tradingview", () => tradingview.search(q)],
+          ["yahoo", () => yahoo.search(q)],
+        ]);
+      } catch (err) {
+        // Both search providers failed outright (as opposed to merely
+        // returning irrelevant results) — a known index alias should still
+        // resolve rather than 502ing the whole request, since it needs no
+        // provider round-trip at all.
+        if (aliasEntry) return [aliasEntry];
+        throw err;
+      }
+      if (aliasEntry && !results.some((r) => r.symbol === aliasEntry.symbol)) {
+        return [aliasEntry, ...results];
       }
       return results;
     });
