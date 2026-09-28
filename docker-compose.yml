@@ -14,12 +14,31 @@ services:
       - API_HOST=0.0.0.0 # safe: still only published to 127.0.0.1 above
       - WEB_ORIGIN=${WEB_ORIGIN:-http://localhost:3000}
       - DATA_DIR=/app/data
+      - JUGAAD_RPC_URL=jugaad-rpc:50051
       # Leave unset unless you put your own trusted reverse proxy in front of
       # the web service (see README > Security defaults) — otherwise a caller
       # could forge X-Forwarded-For to dodge the /api/ai rate limit.
       - TRUST_PROXY=${TRUST_PROXY:-}
     volumes:
       - terminal-data:/app/data
+    depends_on:
+      - jugaad-rpc
+    restart: unless-stopped
+
+  # NSE data service (https://github.com/Am1n1602/jugaad-rs) — primary source
+  # for Indian (.NS/.BO) quotes/history/options/large-deals/announcements.
+  # Not published to the host: only the api service needs to reach it.
+  #
+  # NOTE: as of this commit, the published image only implements
+  # GetStockQuote/WatchStockQuote — the rest of the RPCs this app now calls
+  # (GetStockHistory, GetOptionChain, GetLargeDeals, GetIndexSnapshot,
+  # GetCorporateAnnouncements, GetMarketStatus) exist in jugaad-rs's source
+  # but need a new image build/tag/publish before they're live here. Until
+  # then those calls fail fast (UNAVAILABLE or UNIMPLEMENTED) and the api
+  # service falls back to Yahoo/TradingView exactly as it does when this
+  # container isn't running at all.
+  jugaad-rpc:
+    image: ghcr.io/am1n1602/jugaad-rpc:latest
     restart: unless-stopped
 
   web:

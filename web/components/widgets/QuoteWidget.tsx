@@ -1,14 +1,24 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { apiGet, fmt, fmtCount, fmtMoney, fmtPrice, pctClass, type Quote } from "../../lib/api";
+import { apiGet, fmt, fmtCount, fmtMoney, fmtPrice, isIndianSymbol, pctClass, type Quote } from "../../lib/api";
 import { useWidgetSymbol, type WidgetInstance } from "../../store/terminal";
 import Flash from "../Flash";
 
 type ShortVolume = { date: string; shortVolume: number; shortExemptVolume: number; totalVolume: number; shortVolumePercent: number };
+type LargeDeal = { dealType: string; quantity: number; weightedAvgPrice: number | null; buySell: string | null; date: string };
+
+function summarizeLargeDeals(deals: LargeDeal[] | undefined): string {
+  if (!deals || deals.length === 0) return "—";
+  const counts = new Map<string, number>();
+  for (const d of deals) counts.set(d.dealType, (counts.get(d.dealType) ?? 0) + 1);
+  const parts = [...counts.entries()].map(([type, n]) => `${n} ${type}`).join(", ");
+  return `${deals.length} (${parts})`;
+}
 
 export default function QuoteWidget({ widget }: { widget: WidgetInstance }) {
   const symbol = useWidgetSymbol(widget);
+  const isIndia = isIndianSymbol(symbol);
   const { data, error } = useQuery({
     queryKey: ["quote", symbol],
     queryFn: async () => (await apiGet<Quote[]>(`/api/quotes?symbols=${symbol}`))[0],
@@ -18,7 +28,16 @@ export default function QuoteWidget({ widget }: { widget: WidgetInstance }) {
   const { data: shortVol } = useQuery({
     queryKey: ["short-volume", symbol],
     queryFn: () => apiGet<ShortVolume | null>(`/api/short-volume/${symbol}`),
+    enabled: !isIndia,
     staleTime: 3_600_000,
+  });
+  // NSE's bulk/short/block deals feed — best-effort India equivalent of the
+  // FINRA row above, via jugaad-rpc (see README roadmap).
+  const { data: largeDeals } = useQuery({
+    queryKey: ["large-deals", symbol],
+    queryFn: () => apiGet<LargeDeal[]>(`/api/large-deals/${symbol}`),
+    enabled: isIndia,
+    staleTime: 15 * 60_000,
   });
 
   if (error) return <div className="p-2 down">Error: {(error as Error).message}</div>;
@@ -34,6 +53,7 @@ export default function QuoteWidget({ widget }: { widget: WidgetInstance }) {
     ["Volume", fmtCount(data.volume, data.currency)],
     ["Avg Vol 3M", fmtCount(data.avgVolume, data.currency)],
     ...(shortVol ? ([["Short Vol %", fmt(shortVol.shortVolumePercent, 1) + "%"]] as Array<[string, string]>) : []),
+    ...(isIndia ? ([["Large Deals (Today)", summarizeLargeDeals(largeDeals)]] as Array<[string, string]>) : []),
     ["Mkt Cap", fmtMoney(data.marketCap, data.currency)],
     ["P/E (ttm)", fmt(data.pe)],
     ["EPS (ttm)", fmtPrice(data.eps, data.currency)],

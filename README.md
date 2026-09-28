@@ -94,21 +94,29 @@ No paid API, no keys, and no single point of failure — every endpoint has a fa
 | Data | Primary source | Fallback |
 |---|---|---|
 | Quotes — US (stocks/ETFs) | Nasdaq public quote API | Yahoo Finance → Stooq |
-| Quotes — NSE/BSE (`.NS`/`.BO` symbols) | Yahoo Finance | TradingView scanner (fundamentals only) |
+| Quotes — NSE/BSE (`.NS`/`.BO` symbols) | [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs) (NSE, real‑time)¹ | Yahoo Finance → TradingView scanner (fundamentals only) |
 | Fundamentals (P/E, EPS, beta, div yield) | TradingView scanner API (`america` scan for US, `india` scan for NSE/BSE) | — |
-| Historical candles | Nasdaq chart API (US) / Yahoo Finance chart (`.NS`/`.BO`) | Yahoo Finance → Stooq |
+| Historical candles | Nasdaq chart API (US) / `jugaad-rpc`¹ (NSE) | Yahoo Finance → Stooq (US) / Yahoo Finance (NSE) |
 | Symbol search | TradingView symbol search (sorted India‑first) | Yahoo Finance |
 | Full‑market screener / heatmap | TradingView scanner API — NSE by default, whole‑US or major‑Europe scans a tab away | — |
-| Options chain | Nasdaq option‑chain API (US symbols only for now — see [Roadmap](#-roadmap)) | Yahoo Finance |
+| Options chain — US | Nasdaq option‑chain API | Yahoo Finance |
+| Options chain — NSE index options (NIFTY/BANKNIFTY/FINNIFTY) | `jugaad-rpc`¹ | — |
 | News | Yahoo Finance RSS + Google News RSS, region‑biased to India for `.NS`/`.BO` symbols | — |
 | Crypto quotes & board | CoinGecko | Binance public API |
 | Crypto candles | Binance public API (klines) | — |
-| Macro — India (NIFTY 50 / NIFTY BANK / SENSEX / India VIX) | Yahoo Finance index quotes | — |
+| Macro — India indexes (NIFTY 50 / NIFTY BANK / India VIX) | `jugaad-rpc`¹ (NSE, real‑time) | Yahoo Finance index quotes |
+| Macro — India (SENSEX) | Yahoo Finance index quote (BSE — outside jugaad‑rpc's NSE‑only scope) | — |
 | Macro — US (Treasury yields, VIX) / EU (yields, ECB rate, HICP) | FRED (Federal Reserve) / ECB | — |
 | Economic calendar (schedule, forecast, previous — incl. RBI/India events) | Forex Factory public feed | — |
 | Economic calendar (actual — Fed / ECB / CPI / NFP only) | FRED (Federal Reserve) | — |
 | Earnings calendar (next/last date, EPS estimate) | TradingView scanner API (`india` scan for NSE/BSE symbols) | — |
 | Earnings history (forecast vs. actual, surprise %) | Nasdaq earnings‑surprise API (US symbols only — no NSE equivalent found yet) | — |
+| Short‑volume — US | FINRA Reg SHO daily file | — |
+| Short‑volume — NSE (bulk/short/block deals) | `jugaad-rpc`¹ | — |
+| Insider transactions — US | SEC EDGAR (Form 4) | — |
+| Insider transactions — NSE (best‑effort: general corporate announcements, not SEBI insider‑trading filings specifically) | `jugaad-rpc`¹ | — |
+
+¹ `jugaad-rpc` is this project's own companion NSE data service, run as the `jugaad-rpc` container in `docker-compose.yml` (`JUGAAD_RPC_URL` for a standalone `npm run dev`). **As of this commit its published image only implements live quotes** — the history/options/large‑deals/index‑snapshot/corporate‑announcements RPCs this app now calls exist in [jugaad-rs](https://github.com/Am1n1602/jugaad-rs)'s source but need a new image build+publish before they're live; until then those calls fail fast and fall back to Yahoo/TradingView exactly as if the container weren't running. See [Roadmap](#-roadmap).
 
 > ⚠️ These are public endpoints, not officially licensed data feeds — treat prices as delayed/indicative, not execution‑grade. See [`server/src/providers/`](server/src/providers) — each provider is a small, isolated module, so swapping or adding a data source is a 30‑minute job.
 
@@ -190,12 +198,14 @@ Run tests with `npm test` (Vitest, no network calls). CI runs on every push — 
 
 ## 🗺️ Roadmap
 
-**India data layer (in progress)**
-- [ ] NSE index options chain (NIFTY/BANKNIFTY/FINNIFTY) via [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs)
-- [ ] NSE bulk/block/short deals as the short‑volume widget's India equivalent, also via `jugaad-rpc`
-- [ ] SEBI insider‑trading‑disclosure equivalent for the Insider widget (needs a confirmed NSE endpoint first)
+**India data layer**
+- [x] NSE quotes, history, index options (NIFTY/BANKNIFTY/FINNIFTY), index snapshot (NIFTY 50/NIFTY BANK/India VIX), bulk/short/block deals and corporate announcements, all wired up to call [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs) — this app's code and the RPCs it needs both exist now
+- [ ] **Blocked**: publish a new `jugaad-rpc` image build so those RPCs are actually live — the running container still only serves `GetStockQuote`/`WatchStockQuote` until then (see the data‑source table's footnote)
+- [ ] SEBI insider‑trading‑disclosure‑specific endpoint (the Insider widget's NSE data is general corporate announcements today, not that specifically — needs a confirmed NSE endpoint first, per jugaad‑rs's own verify‑live‑before‑coding discipline)
 - [ ] RBI G‑Sec yield curve for the Macro widget (no free daily source confirmed yet)
 - [ ] NSE‑equivalent of forecast‑vs‑actual earnings history
+- [ ] A way to list all available NSE option expiries (today's option chain only resolves one expiry per call — no dropdown of upcoming dates yet)
+- [ ] Single‑stock NSE F&O options (index options only for now, by design)
 
 **General**
 - [ ] Chart drawing tools & multi‑asset comparison overlay

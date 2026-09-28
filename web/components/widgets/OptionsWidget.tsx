@@ -14,8 +14,14 @@ type Chain = {
   selectedDate: string | null; calls: OptionRow[]; puts: OptionRow[];
 };
 
+// NSE index options this widget supports (see server's INDIA_INDEX_OPTIONS) —
+// independent of the linked/active symbol, since that's usually an equity.
+const INDIA_INDEXES = ["NIFTY", "BANKNIFTY", "FINNIFTY"] as const;
+
 export default function OptionsWidget({ widget }: { widget: WidgetInstance }) {
-  const symbol = useWidgetSymbol(widget);
+  const linkedSymbol = useWidgetSymbol(widget);
+  const [indexSymbol, setIndexSymbol] = useState<string | null>(null);
+  const symbol = indexSymbol ?? linkedSymbol;
   const [expiry, setExpiry] = useState<string | undefined>();
 
   const { data, error, isLoading } = useQuery({
@@ -25,14 +31,36 @@ export default function OptionsWidget({ widget }: { widget: WidgetInstance }) {
     retry: 0,
   });
 
+  const indexPicker = (
+    <div className="flex gap-1 p-1 flex-wrap">
+      <button className={`term-btn ${indexSymbol === null ? "active" : ""}`} onClick={() => { setIndexSymbol(null); setExpiry(undefined); }}>
+        {linkedSymbol}
+      </button>
+      {INDIA_INDEXES.map((ix) => (
+        <button key={ix} className={`term-btn ${indexSymbol === ix ? "active" : ""}`} onClick={() => { setIndexSymbol(ix); setExpiry(undefined); }}>
+          {ix}
+        </button>
+      ))}
+    </div>
+  );
+
   if (error)
     return (
-      <div className="p-2">
-        <div className="down">Option chain unavailable for {symbol}</div>
-        <div className="dim">{(error as Error).message}</div>
+      <div>
+        {indexPicker}
+        <div className="p-2">
+          <div className="down">Option chain unavailable for {symbol}</div>
+          <div className="dim">{(error as Error).message}</div>
+        </div>
       </div>
     );
-  if (isLoading || !data) return <div className="p-2 dim">Loading option chain…</div>;
+  if (isLoading || !data)
+    return (
+      <div>
+        {indexPicker}
+        <div className="p-2 dim">Loading option chain…</div>
+      </div>
+    );
 
   const byStrike = new Map<number, { call?: OptionRow; put?: OptionRow }>();
   for (const c of data.calls) if (c.strike !== null) byStrike.set(c.strike, { ...byStrike.get(c.strike), call: c });
@@ -41,6 +69,7 @@ export default function OptionsWidget({ widget }: { widget: WidgetInstance }) {
 
   return (
     <div>
+      {indexPicker}
       <div className="flex gap-2 items-center p-1">
         <span className="dim">Underlying</span>
         <span className="amber font-bold">{fmt(data.underlyingPrice)}</span>

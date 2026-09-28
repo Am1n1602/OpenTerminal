@@ -13,6 +13,7 @@ import * as news from "../providers/news.js";
 import * as econcalendar from "../providers/econcalendar.js";
 import * as finra from "../providers/finra.js";
 import * as secedgar from "../providers/secedgar.js";
+import * as jugaad from "../providers/jugaad.js";
 
 export const marketRouter = Router();
 
@@ -147,6 +148,21 @@ async function getQuotes(symbols: string[]): Promise<yahoo.Quote[]> {
     remaining = remaining.filter((s) => !fetched.has(s));
   }
 
+  // jugaad-rpc (this project's own NSE service) is the primary source for
+  // Indian symbols when it's running — real-time NSE quotes instead of
+  // Yahoo's delayed ones. A symbol that fails here (service not running,
+  // or NSE having a bad moment) just stays in `remaining` and falls
+  // through the ordinary nasdaq -> yahoo -> stooq chain below, which
+  // already resolves .NS/.BO symbols fine via Yahoo alone.
+  const indiaSymbols = remaining.filter((s) => isIndianSymbol(s));
+  if (indiaSymbols.length > 0) {
+    const results = await Promise.allSettled(indiaSymbols.map((s) => jugaad.quote(s)));
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") fetched.set(indiaSymbols[i], r.value);
+    });
+    remaining = remaining.filter((s) => !fetched.has(s));
+  }
+
   const nasdaqResults = await Promise.allSettled(remaining.map((s) => nasdaq.quote(s)));
   nasdaqResults.forEach((r, i) => {
     if (r.status === "fulfilled") fetched.set(remaining[i], r.value);
@@ -241,6 +257,11 @@ marketRouter.get("/history/:symbol", async (req, res) => {
         ? binance.history(symbol, rangeKey)
         : isVix(symbol)
         ? vixHistory(rangeKey)
+        : isIndianSymbol(symbol)
+        ? withFallback([
+            ["jugaad", () => jugaad.history(symbol, rangeKey)],
+            ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
+          ])
         : withFallback([
             ["nasdaq", () => nasdaq.history(symbol, rangeKey)],
             ["yahoo", () => yahoo.history(symbol, yahooRange(rangeKey).range, yahooRange(rangeKey).interval)],
@@ -330,9 +351,23 @@ marketRouter.get("/econ-calendar", async (req, res) => {
 
 // ---- options ----
 
+// NSE index options this widget supports for now (Phase 2 scope decision —
+// index options only, not the ~180 single-stock F&O names).
+const INDIA_INDEX_OPTIONS = new Set(["NIFTY", "BANKNIFTY", "FINNIFTY"]);
+
 marketRouter.get("/options/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const expiry = req.query.expiry ? String(req.query.expiry) : undefined;
+  if (INDIA_INDEX_OPTIONS.has(symbol)) {
+    try {
+      const data = await cached(`options:${symbol}:${expiry ?? "front"}`, 60_000, () =>
+        jugaad.optionChain(symbol, "index", expiry)
+      );
+      return res.json(data);
+    } catch (err) {
+      return fail(req, res, err);
+    }
+  }
   try {
     const data = await cached(`options:${symbol}:${expiry ?? "front"}`, 60_000, () =>
       withFallback([
@@ -498,16 +533,47 @@ marketRouter.get("/macro", async (req, res) => {
 
     if (req.query.region === "in") {
       // No free daily RBI G-Sec yield-curve source has been confirmed yet
-      // (see plan follow-ups) — yields ships empty rather than guessed at.
-      // NIFTY 50 / NIFTY BANK / SENSEX / India VIX all come back from one
-      // getQuotes() call, same as the US/EU index-proxy lists above.
-      const quotes = await getQuotes(Object.keys(INDIA_INDEX_PROXIES));
-      const indexes = quotes.map((q) => ({
-        symbol: q.symbol,
-        label: INDIA_INDEX_PROXIES[q.symbol] ?? q.symbol,
-        price: q.price,
-        changePercent: q.changePercent,
-      }));
+      // (see README roadmap) — yields ships empty rather than guessed at.
+      //
+      // NSE's own index snapshot (via jugaad-rpc) covers NIFTY 50/NIFTY
+      // BANK/India VIX in one call when that service is running — real-time
+      // rather than Yahoo's delayed feed. SENSEX is a BSE index NSE doesn't
+      // carry, so it (and everything, if jugaad-rpc is unreachable) comes
+      // from Yahoo via the existing INDIA_INDEX_PROXIES map instead.
+      let indexes: Array<{ symbol: string; label: string; price: number | null; changePercent: number | null }> = [];
+      try {
+        const snapshot = await jugaad.indexSnapshot();
+        // Exact `name`/`symbol` spelling NSE uses isn't verified live from
+        // this environment — matched tolerantly so a spelling mismatch just
+        // means this index is skipped (falls back to Yahoo below), not a
+        // thrown error.
+        const pick = (matcher: RegExp) => snapshot.find((r) => matcher.test(r.name) || matcher.test(r.symbol));
+        for (const [row, label] of [
+          [pick(/^nifty\s*50$/i), "NIFTY 50"],
+          [pick(/nifty\s*bank/i), "NIFTY BANK"],
+          [pick(/india\s*vix/i), "India VIX"],
+        ] as const) {
+          if (row) indexes.push({ symbol: row.symbol, label, price: row.last, changePercent: row.changePercent });
+        }
+      } catch {
+        // jugaad-rpc unreachable — indexes stays empty, Yahoo fallback below covers it.
+      }
+
+      const sensex = await getQuotes(["^BSESN"]).catch(() => []);
+      if (sensex[0]) {
+        indexes.push({ symbol: "^BSESN", label: "SENSEX", price: sensex[0].price, changePercent: sensex[0].changePercent });
+      }
+
+      if (indexes.length === 0) {
+        const quotes = await getQuotes(Object.keys(INDIA_INDEX_PROXIES));
+        indexes = quotes.map((q) => ({
+          symbol: q.symbol,
+          label: INDIA_INDEX_PROXIES[q.symbol] ?? q.symbol,
+          price: q.price,
+          changePercent: q.changePercent,
+        }));
+      }
+
       if (indexes.length === 0) throw new Error("no India macro data from any provider");
       res.json({ yields: [], vix: null, indexes, policyRate: null, inflation: null });
       return;
@@ -822,6 +888,36 @@ marketRouter.get("/insider/:symbol", async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   try {
     const data = await cached(`insider:${symbol}`, 3_600_000, () => secedgar.insiderTransactions(symbol));
+    res.json(data);
+  } catch (err) {
+    fail(req, res, err);
+  }
+});
+
+// ---- NSE bulk/short/block deals — the nearest India equivalent of FINRA's
+// daily short-sale-volume file, via jugaad-rpc's large-deals feed ----
+
+marketRouter.get("/large-deals/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  try {
+    const deals = await cached("jugaad-large-deals", 15 * 60_000, () => jugaad.largeDeals());
+    const bare = symbol.replace(/\.(NS|BO)$/i, "");
+    res.json(deals.filter((d) => d.symbol === bare));
+  } catch (err) {
+    fail(req, res, err);
+  }
+});
+
+// ---- NSE corporate announcements — best-effort Insider-widget equivalent
+// for Indian symbols via jugaad-rpc (general exchange disclosures, not
+// specifically SEBI insider-trading filings — see README roadmap) ----
+
+marketRouter.get("/corporate-announcements/:symbol", async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  try {
+    const data = await cached(`jugaad-announcements:${symbol}`, 3_600_000, () =>
+      jugaad.corporateAnnouncements(symbol)
+    );
     res.json(data);
   } catch (err) {
     fail(req, res, err);
