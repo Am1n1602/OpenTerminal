@@ -396,11 +396,20 @@ marketRouter.get("/options/:symbol", async (req, res) => {
 
 // ---- crypto ----
 
+// ?currency=inr shows INR-denominated prices (CoinGecko supports it natively).
+// The Binance fallback only has USDT pairs, so it always reports USD
+// regardless of the requested currency — a reasonable degradation rather
+// than failing the whole board when CoinGecko is down.
+function cryptoCurrency(req: any): "usd" | "inr" {
+  return req.query.currency === "inr" ? "inr" : "usd";
+}
+
 marketRouter.get("/crypto", async (req, res) => {
+  const currency = cryptoCurrency(req);
   try {
-    const data = await cached("crypto:markets", 5_000, () =>
+    const data = await cached(`crypto:markets:${currency}`, 5_000, () =>
       withFallback([
-        ["coingecko", () => coingecko.markets(50)],
+        ["coingecko", () => coingecko.markets(50, currency)],
         ["binance", () => binance.markets()],
       ])
     );
@@ -411,9 +420,10 @@ marketRouter.get("/crypto", async (req, res) => {
 });
 
 marketRouter.get("/crypto/global", async (req, res) => {
+  const currency = cryptoCurrency(req);
   try {
-    const data = await cached("crypto:global", 120_000, () =>
-      withFallback([["coingecko", () => coingecko.globalStats()]])
+    const data = await cached(`crypto:global:${currency}`, 120_000, () =>
+      withFallback([["coingecko", () => coingecko.globalStats(currency)]])
     );
     res.json(data);
   } catch (err) {

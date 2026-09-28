@@ -199,12 +199,12 @@ Run tests with `npm test` (Vitest, no network calls). CI runs on every push — 
 ## 🗺️ Roadmap
 
 **India data layer**
-- [x] NSE quotes, history, index options (NIFTY/BANKNIFTY/FINNIFTY), index snapshot (NIFTY 50/NIFTY BANK/India VIX), bulk/short/block deals and corporate announcements, all wired up to call [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs) — this app's code and the RPCs it needs both exist now
+- [x] NSE quotes, history, index options (NIFTY/BANKNIFTY/FINNIFTY), full option‑expiry listing, index snapshot (NIFTY 50/NIFTY BANK/India VIX), bulk/short/block deals and corporate announcements, all wired up to call [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs) — this app's code and the RPCs it needs both exist now (`GetOptionExpiries` added in Phase 3, reusing jugaad-core's already‑live‑verified `option-chain-contract-info` parsing rather than guessing at new NSE behavior)
 - [ ] **Blocked**: publish a new `jugaad-rpc` image build so those RPCs are actually live — the running container still only serves `GetStockQuote`/`WatchStockQuote` until then (see the data‑source table's footnote)
 - [ ] SEBI insider‑trading‑disclosure‑specific endpoint (the Insider widget's NSE data is general corporate announcements today, not that specifically — needs a confirmed NSE endpoint first, per jugaad‑rs's own verify‑live‑before‑coding discipline)
-- [ ] RBI G‑Sec yield curve for the Macro widget (no free daily source confirmed yet)
+- [ ] RBI G‑Sec yield curve for the Macro widget — researched (RBI's DBIE portal, data.rbi.org.in/DBIE, looks like the best free lead, similar in spirit to FRED for the US) but not verified: this environment's network policy blocks egress to data.rbi.org.in outright, so whether it has a clean CSV/JSON endpoint (vs. only an interactive portal) needs checking from a normal connection before building against it
 - [ ] NSE‑equivalent of forecast‑vs‑actual earnings history
-- [ ] A way to list all available NSE option expiries (today's option chain only resolves one expiry per call — no dropdown of upcoming dates yet)
+- [ ] Additional Indian financial news RSS sources (Moneycontrol/ET/LiveMint) — same blocker as above, candidate URLs turned up by search but unverifiable from here; verify before adding
 - [ ] Single‑stock NSE F&O options (index options only for now, by design)
 
 **General**

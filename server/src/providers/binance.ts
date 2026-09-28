@@ -29,6 +29,7 @@ export async function markets(): Promise<CryptoRow[]> {
       volume24h: +r.quoteVolume,
       rank: null,
       sparkline: [],
+      currency: "USD", // Binance's USDT pairs only — no INR fallback for this fixed list
     }))
     .sort((a, b) => (b.volume24h ?? 0) - (a.volume24h ?? 0));
 }

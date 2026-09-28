@@ -31,12 +31,12 @@ services:
   #
   # NOTE: as of this commit, the published image only implements
   # GetStockQuote/WatchStockQuote — the rest of the RPCs this app now calls
-  # (GetStockHistory, GetOptionChain, GetLargeDeals, GetIndexSnapshot,
-  # GetCorporateAnnouncements, GetMarketStatus) exist in jugaad-rs's source
-  # but need a new image build/tag/publish before they're live here. Until
-  # then those calls fail fast (UNAVAILABLE or UNIMPLEMENTED) and the api
-  # service falls back to Yahoo/TradingView exactly as it does when this
-  # container isn't running at all.
+  # (GetStockHistory, GetOptionChain, GetOptionExpiries, GetLargeDeals,
+  # GetIndexSnapshot, GetCorporateAnnouncements, GetMarketStatus) exist in
+  # jugaad-rs's source but need a new image build/tag/publish before they're
+  # live here. Until then those calls fail fast (UNAVAILABLE or
+  # UNIMPLEMENTED) and the api service falls back to Yahoo/TradingView
+  # exactly as it does when this container isn't running at all.
   jugaad-rpc:
     image: ghcr.io/am1n1602/jugaad-rpc:latest
     restart: unless-stopped

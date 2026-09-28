@@ -198,12 +198,6 @@ export type JugaadOptionRow = {
 export type JugaadChain = {
   symbol: string;
   underlyingPrice: number | null;
-  // jugaad-core's option_chain_raw only resolves one expiry per call (the
-  // nearest one, or the one requested) — it doesn't yet expose a way to
-  // list every available expiry the way Nasdaq's chain endpoint does, so
-  // this is always a single-element list. See the Phase 2 roadmap note in
-  // the README: switching expiries works, but there's no dropdown of
-  // upcoming dates to pick from yet.
   expirationDates: string[];
   selectedDate: string | null;
   calls: JugaadOptionRow[];
@@ -226,6 +220,22 @@ function legToRow(leg: any, strike: number): JugaadOptionRow {
   };
 }
 
+/**
+ * Every available expiry date for a symbol's option chain, nearest first.
+ * Falls back to an empty list (never throws) if the running jugaad-rpc
+ * predates this RPC — optionChain() below still works fine with just the
+ * one expiry it resolves itself in that case.
+ */
+export async function optionExpiries(symbol: string, kind: "index" | "equity"): Promise<string[]> {
+  const reqSymbol = kind === "equity" ? bareSymbol(symbol) : symbol;
+  try {
+    const res = await call<{ symbol: string }, { expiries: string[] }>("getOptionExpiries", { symbol: reqSymbol });
+    return res.expiries ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export async function optionChain(
   symbol: string,
   kind: "index" | "equity",
@@ -236,7 +246,10 @@ export async function optionChain(
     kind: kind === "equity" ? "OPTION_CHAIN_KIND_EQUITY" : "OPTION_CHAIN_KIND_INDEX",
   };
   if (expiry) req.expiry = expiry;
-  const res = await call<typeof req, { rows: any[] }>("getOptionChain", req);
+  const [res, expiries] = await Promise.all([
+    call<typeof req, { rows: any[] }>("getOptionChain", req),
+    optionExpiries(symbol, kind),
+  ]);
   const rows = res.rows ?? [];
 
   let underlyingPrice: number | null = null;
@@ -257,7 +270,7 @@ export async function optionChain(
   return {
     symbol,
     underlyingPrice,
-    expirationDates: selectedDate ? [selectedDate] : [],
+    expirationDates: expiries.length > 0 ? expiries : selectedDate ? [selectedDate] : [],
     selectedDate,
     calls,
     puts,
