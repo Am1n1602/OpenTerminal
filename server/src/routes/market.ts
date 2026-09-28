@@ -34,6 +34,11 @@ function isVix(symbol: string): boolean {
   return symbol.toUpperCase() === "^VIX" || symbol.toUpperCase() === "VIX";
 }
 
+// A .NS/.BO-suffixed symbol is NSE/BSE-listed under this app's symbol convention.
+function isIndianSymbol(symbol: string): boolean {
+  return /\.(NS|BO)$/i.test(symbol);
+}
+
 async function vixQuote(): Promise<yahoo.Quote> {
   const points = await fred.series("VIXCLS", 5);
   if (points.length === 0) throw new Error("fred: no VIX data");
@@ -288,14 +293,19 @@ marketRouter.get("/news", async (req, res) => {
   try {
     const data = await cached(`news:${symbol ?? "top"}`, NEWS_TTL, async () => {
       if (symbol) {
-        const lists = await Promise.allSettled([news.symbolNews(symbol), news.topNews(symbol + " stock")]);
+        const region = isIndianSymbol(symbol) ? "IN" : "US";
+        const bare = symbol.replace(/\.(NS|BO)$/i, "");
+        const lists = await Promise.allSettled([
+          news.symbolNews(symbol, region),
+          news.topNews(bare + " stock", region),
+        ]);
         const ok = lists.filter((r) => r.status === "fulfilled").map((r) => (r as any).value);
         if (ok.length === 0) throw new Error("all news sources failed");
         return news.dedupe(ok).slice(0, 40);
       }
       const lists = await Promise.allSettled([
-        news.topNews("stock market"),
-        news.topNews("federal reserve economy"),
+        news.topNews("sensex nifty rbi", "IN"),
+        news.topNews("stock market", "US"),
       ]);
       const ok = lists.filter((r) => r.status === "fulfilled").map((r) => (r as any).value);
       if (ok.length === 0) throw new Error("all news sources failed");
@@ -400,6 +410,17 @@ const YIELD_SERIES: Array<{ id: string; tenor: string }> = [
   { id: "DGS30", tenor: "30Y" },
 ];
 
+// India's own major indexes/VIX are quoted directly (no ETF-proxy trick
+// needed) — Yahoo already serves ^NSEI/^NSEBANK/^BSESN/^INDIAVIX like any
+// other index ticker, through the same nasdaq->yahoo->stooq cascade
+// getQuotes() already runs for everything else.
+const INDIA_INDEX_PROXIES: Record<string, string> = {
+  "^NSEI": "NIFTY 50",
+  "^NSEBANK": "NIFTY BANK",
+  "^BSESN": "SENSEX",
+  "^INDIAVIX": "India VIX",
+};
+
 const INDEX_PROXIES: Record<string, string> = {
   SPY: "S&P 500 (SPY)",
   DIA: "Dow Jones (DIA)",
@@ -475,6 +496,23 @@ marketRouter.get("/macro", async (req, res) => {
       return;
     }
 
+    if (req.query.region === "in") {
+      // No free daily RBI G-Sec yield-curve source has been confirmed yet
+      // (see plan follow-ups) — yields ships empty rather than guessed at.
+      // NIFTY 50 / NIFTY BANK / SENSEX / India VIX all come back from one
+      // getQuotes() call, same as the US/EU index-proxy lists above.
+      const quotes = await getQuotes(Object.keys(INDIA_INDEX_PROXIES));
+      const indexes = quotes.map((q) => ({
+        symbol: q.symbol,
+        label: INDIA_INDEX_PROXIES[q.symbol] ?? q.symbol,
+        price: q.price,
+        changePercent: q.changePercent,
+      }));
+      if (indexes.length === 0) throw new Error("no India macro data from any provider");
+      res.json({ yields: [], vix: null, indexes, policyRate: null, inflation: null });
+      return;
+    }
+
     const [yieldResults, vix, quotes] = await Promise.all([
       Promise.allSettled(YIELD_SERIES.map((s) => cached(`fred:${s.id}`, 300_000, () => fred.latest(s.id)))),
       cached("fred:VIXCLS", 300_000, () => fred.latest("VIXCLS")).catch(() => null),
@@ -501,10 +539,14 @@ marketRouter.get("/macro", async (req, res) => {
 
 // ---- heatmap + screener over the full market (TradingView scanner — live) ----
 // ?market=eu switches from the whole-US scan to the merged major-European-
-// exchanges scan (see tradingview.europeMarketScan).
+// exchanges scan (see tradingview.europeMarketScan); ?market=in switches to
+// the NSE scan (see tradingview.indiaMarketScan). "in" is the default —
+// India is this terminal's primary market.
 
-function marketParam(req: any): "us" | "eu" {
-  return req.query.market === "eu" ? "eu" : "us";
+function marketParam(req: any): "us" | "eu" | "in" {
+  if (req.query.market === "eu") return "eu";
+  if (req.query.market === "us") return "us";
+  return "in";
 }
 
 // TradingView reports market cap in each stock's own listing currency (SEK,
@@ -530,7 +572,7 @@ async function eurFxRates(): Promise<Record<string, number>> {
   return rates;
 }
 
-async function marketRows(market: "us" | "eu"): Promise<tradingview.MarketRow[]> {
+async function marketRows(market: "us" | "eu" | "in"): Promise<tradingview.MarketRow[]> {
   if (market === "eu") {
     return cached("marketscan:eu", 5_000, async () => {
       const [rows, fx] = await Promise.all([tradingview.europeMarketScan(1500), eurFxRates()]);
@@ -539,6 +581,9 @@ async function marketRows(market: "us" | "eu"): Promise<tradingview.MarketRow[]>
         return rate && r.marketCap ? { ...r, marketCap: r.marketCap / rate } : r;
       });
     });
+  }
+  if (market === "in") {
+    return cached("marketscan:in", 3_000, () => tradingview.indiaMarketScan(1500));
   }
   return cached("marketscan:full", 3_000, () => tradingview.marketScan(1500));
 }

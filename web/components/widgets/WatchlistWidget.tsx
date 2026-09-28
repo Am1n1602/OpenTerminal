@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiGet, fmt, fmtBig, pctClass, type Quote } from "../../lib/api";
+import { apiGet, fmtCount, fmtPrice, fmt, pctClass, type Quote } from "../../lib/api";
 import { useTerminal } from "../../store/terminal";
 import Flash from "../Flash";
 
@@ -50,11 +50,11 @@ export default function WatchlistWidget() {
             return (
               <tr key={sym} onClick={() => setActiveSymbol(sym)}>
                 <td className="font-bold">{sym}</td>
-                <td><Flash value={q?.price}>{fmt(q?.price)}</Flash></td>
+                <td><Flash value={q?.price}>{fmtPrice(q?.price, q?.currency)}</Flash></td>
                 <td className={pctClass(q?.changePercent)}>
                   <Flash value={q?.changePercent}>{fmt(q?.changePercent)}%</Flash>
                 </td>
-                <td>{fmtBig(q?.volume)}</td>
+                <td>{fmtCount(q?.volume, q?.currency)}</td>
                 <td>
                   <button
                     onClick={(e) => {

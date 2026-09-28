@@ -2,19 +2,19 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiGet, fmt, fmtBig, pctClass } from "../../lib/api";
+import { apiGet, fmt, fmtCount, fmtMoney, fmtPrice, pctClass } from "../../lib/api";
 import { useTerminal } from "../../store/terminal";
 import Flash from "../Flash";
 
 type Row = {
   symbol: string; name: string; price: number | null;
   changePercent: number | null; volume: number | null; marketCap: number | null;
-  sector: string;
+  sector: string; currency?: string;
 };
 
 export default function ScreenerWidget() {
   const setActiveSymbol = useTerminal((s) => s.setActiveSymbol);
-  const [market, setMarket] = useState<"us" | "eu">("us");
+  const [market, setMarket] = useState<"in" | "us" | "eu">("in");
   const [sector, setSector] = useState("");
   const [changeMin, setChangeMin] = useState("");
   const [marketCapMinB, setMarketCapMinB] = useState("");
@@ -32,7 +32,7 @@ export default function ScreenerWidget() {
   params.set("market", market);
   if (sector) params.set("sector", sector);
   if (changeMin) params.set("changeMin", changeMin);
-  if (marketCapMinB) params.set("marketCapMin", String(Number(marketCapMinB) * 1e9));
+  if (marketCapMinB) params.set("marketCapMin", String(Number(marketCapMinB) * (market === "in" ? 1e7 : 1e9)));
   if (volumeMinM) params.set("volumeMin", String(Number(volumeMinM) * 1e6));
   params.set("sort", sort);
   params.set("dir", dir);
@@ -59,7 +59,7 @@ export default function ScreenerWidget() {
     <div>
       <div className="flex gap-2 p-1 flex-wrap items-center">
         <div className="flex gap-1">
-          {(["us", "eu"] as const).map((m) => (
+          {(["in", "us", "eu"] as const).map((m) => (
             <button key={m} className={`term-btn ${market === m ? "active" : ""}`} onClick={() => setMarket(m)}>
               {m.toUpperCase()}
             </button>
@@ -72,7 +72,12 @@ export default function ScreenerWidget() {
           ))}
         </select>
         <input className="w-20" placeholder="Chg% min" value={changeMin} onChange={(e) => setChangeMin(e.target.value)} />
-        <input className="w-24" placeholder="MCap min ($B)" value={marketCapMinB} onChange={(e) => setMarketCapMinB(e.target.value)} />
+        <input
+          className="w-24"
+          placeholder={market === "in" ? "MCap min (₹Cr)" : "MCap min ($B)"}
+          value={marketCapMinB}
+          onChange={(e) => setMarketCapMinB(e.target.value)}
+        />
         <input className="w-24" placeholder="Vol min (M)" value={volumeMinM} onChange={(e) => setVolumeMinM(e.target.value)} />
         <span className="dim ml-auto">{isLoading ? "…" : `${data.length} results`}</span>
       </div>
@@ -95,12 +100,12 @@ export default function ScreenerWidget() {
               <td className="font-bold">{q.symbol}</td>
               <td className="!text-left max-w-40 truncate">{q.name}</td>
               <td className="!text-left dim">{q.sector}</td>
-              <td><Flash value={q.price}>{fmt(q.price)}</Flash></td>
+              <td><Flash value={q.price}>{fmtPrice(q.price, q.currency)}</Flash></td>
               <td className={pctClass(q.changePercent)}>
                 <Flash value={q.changePercent}>{fmt(q.changePercent)}%</Flash>
               </td>
-              <td>{fmtBig(q.volume)}</td>
-              <td>{fmtBig(q.marketCap)}</td>
+              <td>{fmtCount(q.volume, q.currency)}</td>
+              <td>{fmtMoney(q.marketCap, q.currency)}</td>
             </tr>
           ))}
         </tbody>
