@@ -26,7 +26,9 @@ portfolioRouter.delete("/:id", (req, res) => {
 });
 
 const txSchema = z.object({
-  symbol: z.string().min(1).max(12).transform((s) => s.toUpperCase()),
+  // 20 covers NSE/BSE symbols with their .NS/.BO suffix (e.g. "HINDUNILVR.NS",
+  // 13 chars) alongside plain US tickers.
+  symbol: z.string().min(1).max(20).transform((s) => s.toUpperCase()),
   side: z.enum(["BUY", "SELL"]),
   quantity: z.number().positive(),
   price: z.number().nonnegative(),

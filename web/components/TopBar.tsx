@@ -29,6 +29,9 @@ function Clock({ tz, label }: { tz: string; label: string }) {
   );
 }
 
+// Client-computed fallback for when /api/market-status isn't reachable
+// (jugaad-rpc down) — day-of-week/time-of-day only, so it can't know NSE's
+// holiday calendar the way the real market-status endpoint can.
 function marketStateNSE(): { label: string; open: boolean } {
   const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const day = ist.getDay();
@@ -45,8 +48,16 @@ export default function TopBar() {
     queryFn: () => apiGet<Status>("/api/status"),
     refetchInterval: 30_000,
   });
+  const { data: marketStatus } = useQuery({
+    queryKey: ["market-status"],
+    queryFn: () => apiGet<{ open: boolean; status: string }>("/api/market-status"),
+    refetchInterval: 30_000,
+    retry: 0,
+  });
 
-  const market = marketStateNSE();
+  const market = marketStatus
+    ? { open: marketStatus.open, label: marketStatus.open ? "NSE OPEN" : "NSE CLOSED" }
+    : marketStateNSE();
   const healthy = status?.providers.filter((p) => p.ok > 0) ?? [];
 
   return (

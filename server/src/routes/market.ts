@@ -548,33 +548,35 @@ marketRouter.get("/macro", async (req, res) => {
       // NSE's own index snapshot (via jugaad-rpc) covers NIFTY 50/NIFTY
       // BANK/India VIX in one call when that service is running — real-time
       // rather than Yahoo's delayed feed. SENSEX is a BSE index NSE doesn't
-      // carry, so it (and everything, if jugaad-rpc is unreachable) comes
-      // from Yahoo via the existing INDIA_INDEX_PROXIES map instead.
-      let indexes: Array<{ symbol: string; label: string; price: number | null; changePercent: number | null }> = [];
-      try {
-        const snapshot = await jugaad.indexSnapshot();
+      // carry, so it comes from Yahoo either way — run both lookups
+      // concurrently rather than paying the jugaad-rpc deadline before even
+      // starting the (independent) SENSEX request.
+      const [snapshotOrNull, sensex] = await Promise.all([
+        jugaad.indexSnapshot().catch(() => null),
+        getQuotes(["^BSESN"]).catch(() => []),
+      ]);
+
+      const niftyFamily: Array<{ symbol: string; label: string; price: number | null; changePercent: number | null }> = [];
+      if (snapshotOrNull) {
         // Exact `name`/`symbol` spelling NSE uses isn't verified live from
         // this environment — matched tolerantly so a spelling mismatch just
         // means this index is skipped (falls back to Yahoo below), not a
         // thrown error.
-        const pick = (matcher: RegExp) => snapshot.find((r) => matcher.test(r.name) || matcher.test(r.symbol));
+        const pick = (matcher: RegExp) => snapshotOrNull.find((r) => matcher.test(r.name) || matcher.test(r.symbol));
         for (const [row, label] of [
           [pick(/^nifty\s*50$/i), "NIFTY 50"],
           [pick(/nifty\s*bank/i), "NIFTY BANK"],
           [pick(/india\s*vix/i), "India VIX"],
         ] as const) {
-          if (row) indexes.push({ symbol: row.symbol, label, price: row.last, changePercent: row.changePercent });
+          if (row) niftyFamily.push({ symbol: row.symbol, label, price: row.last, changePercent: row.changePercent });
         }
-      } catch {
-        // jugaad-rpc unreachable — indexes stays empty, Yahoo fallback below covers it.
       }
 
-      const sensex = await getQuotes(["^BSESN"]).catch(() => []);
-      if (sensex[0]) {
-        indexes.push({ symbol: "^BSESN", label: "SENSEX", price: sensex[0].price, changePercent: sensex[0].changePercent });
-      }
-
-      if (indexes.length === 0) {
+      // Fall back to Yahoo for everything (NIFTY 50/BANK/VIX included) only
+      // when jugaad-rpc itself came up empty — checked before SENSEX is
+      // added below, so one Yahoo success doesn't mask a jugaad-rpc miss.
+      let indexes = niftyFamily;
+      if (niftyFamily.length === 0) {
         const quotes = await getQuotes(Object.keys(INDIA_INDEX_PROXIES));
         indexes = quotes.map((q) => ({
           symbol: q.symbol,
@@ -582,6 +584,11 @@ marketRouter.get("/macro", async (req, res) => {
           price: q.price,
           changePercent: q.changePercent,
         }));
+      } else if (sensex[0]) {
+        indexes = [
+          ...niftyFamily,
+          { symbol: "^BSESN", label: "SENSEX", price: sensex[0].price, changePercent: sensex[0].changePercent },
+        ];
       }
 
       if (indexes.length === 0) throw new Error("no India macro data from any provider");
@@ -929,6 +936,27 @@ marketRouter.get("/corporate-announcements/:symbol", async (req, res) => {
       jugaad.corporateAnnouncements(symbol)
     );
     res.json(data);
+  } catch (err) {
+    fail(req, res, err);
+  }
+});
+
+// ---- NSE market status — holiday-aware open/closed, unlike a client-computed
+// IST clock (which can't know NSE's holiday calendar) ----
+
+marketRouter.get("/market-status", async (req, res) => {
+  try {
+    const segments = await cached("jugaad-market-status", 30_000, () => jugaad.marketStatus());
+    // Exact `market` spelling NSE uses isn't verified live from this
+    // environment — matched tolerantly (see the /macro region=in handler
+    // above for the same reasoning).
+    const capitalMarket = segments.find((s) => /capital market/i.test(s.market));
+    if (!capitalMarket) throw new Error("no capital market segment in jugaad-rpc market status");
+    res.json({
+      open: /open/i.test(capitalMarket.status),
+      status: capitalMarket.status,
+      tradeDate: capitalMarket.tradeDate,
+    });
   } catch (err) {
     fail(req, res, err);
   }

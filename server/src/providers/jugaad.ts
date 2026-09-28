@@ -215,7 +215,10 @@ function legToRow(leg: any, strike: number): JugaadOptionRow {
     // NSE reports IV as a percentage number (e.g. 15.23), unlike this app's
     // usual fraction convention (0.1523, matching Yahoo's raw value) — /100
     // normalizes it, but this isn't verified against a live response yet.
-    impliedVolatility: leg.impliedVolatility ? leg.impliedVolatility / 100 : null,
+    // implied_volatility is a plain (non-optional) proto double, so it's
+    // always a real number (0 for a genuinely quoteless deep strike) —
+    // never treat that 0 as "missing" the way a falsy check would.
+    impliedVolatility: leg.impliedVolatility / 100,
     inTheMoney: false, // filled in by the caller, which knows the underlying price
   };
 }

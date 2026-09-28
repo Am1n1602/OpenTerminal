@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiGet, fmt, pctClass } from "../../lib/api";
+import { apiGet, fmt, fmtINR, pctClass } from "../../lib/api";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from "recharts";
 import { useTerminal } from "../../store/terminal";
 import Flash from "../Flash";
@@ -98,7 +98,7 @@ function MacroBody({
           {data.indexes.map((q) => (
             <tr key={q.symbol} onClick={() => setActiveSymbol(q.symbol)}>
               <td>{q.label}</td>
-              <td><Flash value={q.price}>{fmt(q.price)}</Flash></td>
+              <td><Flash value={q.price}>{region === "in" ? fmtINR(q.price) : fmt(q.price)}</Flash></td>
               <td className={pctClass(q.changePercent)}>
                 <Flash value={q.changePercent}>{fmt(q.changePercent)}%</Flash>
               </td>

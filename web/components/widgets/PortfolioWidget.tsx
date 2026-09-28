@@ -56,18 +56,23 @@ export default function PortfolioWidget() {
     },
   });
 
-  const totals = positions.reduce(
+  // Grouped by currency rather than summed together — a portfolio can hold
+  // both USD and INR positions, and a single blended total would be a
+  // meaningless number with no unit.
+  const totalsByCurrency = positions.reduce<Record<string, { marketValue: number; cost: number; realized: number }>>(
     (acc, p) => {
       const q = quotes.find((x) => x.symbol === p.symbol);
+      const currency = q?.currency ?? (isIndianSymbol(p.symbol) ? "INR" : "USD");
       const mv = (q?.price ?? p.avgCost) * p.quantity;
-      acc.marketValue += mv;
-      acc.cost += p.avgCost * p.quantity;
-      acc.realized += p.realizedPnl;
+      const cur = acc[currency] ?? { marketValue: 0, cost: 0, realized: 0 };
+      cur.marketValue += mv;
+      cur.cost += p.avgCost * p.quantity;
+      cur.realized += p.realizedPnl;
+      acc[currency] = cur;
       return acc;
     },
-    { marketValue: 0, cost: 0, realized: 0 }
+    {}
   );
-  const unrealized = totals.marketValue - totals.cost;
 
   return (
     <div>
@@ -80,10 +85,18 @@ export default function PortfolioWidget() {
         <button className={`term-btn ${showTx ? "active" : ""}`} onClick={() => setShowTx(!showTx)}>
           TRANSACTIONS
         </button>
-        <span className="ml-auto">
-          MV <span className="amber">{fmt(totals.marketValue)}</span>{" "}
-          <span className="dim">Unrl</span> <span className={pctClass(unrealized)}>{fmt(unrealized)}</span>{" "}
-          <span className="dim">Rlzd</span> <span className={pctClass(totals.realized)}>{fmt(totals.realized)}</span>
+        <span className="ml-auto flex gap-3">
+          {Object.entries(totalsByCurrency).map(([currency, t]) => {
+            const unrealized = t.marketValue - t.cost;
+            return (
+              <span key={currency}>
+                <span className="dim">{currency}</span>{" "}
+                MV <span className="amber">{fmtPrice(t.marketValue, currency)}</span>{" "}
+                <span className="dim">Unrl</span> <span className={pctClass(unrealized)}>{fmtPrice(unrealized, currency)}</span>{" "}
+                <span className="dim">Rlzd</span> <span className={pctClass(t.realized)}>{fmtPrice(t.realized, currency)}</span>
+              </span>
+            );
+          })}
         </span>
       </div>
 
