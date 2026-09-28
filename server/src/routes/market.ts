@@ -291,16 +291,35 @@ function yahooRange(rangeKey: string): { range: string; interval: string } {
 
 // ---- search ----
 
+// TradingView's search explicitly excludes "index"-type results (see its
+// `type` filter in tradingview.ts), so a plain text search for one of these
+// index names would otherwise only ever turn up unrelated ETFs/funds with
+// that name in them (e.g. searching "NIFTY 50" surfaces "First Trust India
+// Nifty 50 Equal Weight ETF", never the index itself) — checked before the
+// real search providers so these specific well-known indices always
+// resolve, regardless of what TradingView/Yahoo's own search returns.
+const INDEX_ALIASES: Array<{ match: RegExp; symbol: string; name: string; exchange: string }> = [
+  { match: /^nifty\s*50$/i, symbol: "^NSEI", name: "NIFTY 50", exchange: "NSE" },
+  { match: /^(nifty\s*bank|bank\s*nifty)$/i, symbol: "^NSEBANK", name: "NIFTY BANK", exchange: "NSE" },
+  { match: /^india\s*vix$/i, symbol: "^INDIAVIX", name: "India VIX", exchange: "NSE" },
+  { match: /^sensex$/i, symbol: "^BSESN", name: "SENSEX", exchange: "BSE" },
+];
+
 marketRouter.get("/search", async (req, res) => {
   const q = String(req.query.q ?? "").trim();
   if (!q) return res.json([]);
   try {
-    const data = await cached(`search:${q.toLowerCase()}`, 300_000, () =>
-      withFallback([
+    const data = await cached(`search:${q.toLowerCase()}`, 300_000, async () => {
+      const results = await withFallback([
         ["tradingview", () => tradingview.search(q)],
         ["yahoo", () => yahoo.search(q)],
-      ])
-    );
+      ]);
+      const alias = INDEX_ALIASES.find((a) => a.match.test(q));
+      if (alias && !results.some((r) => r.symbol === alias.symbol)) {
+        return [{ symbol: alias.symbol, name: alias.name, exchange: alias.exchange, type: "index" }, ...results];
+      }
+      return results;
+    });
     res.json(data);
   } catch (err) {
     fail(req, res, err);
