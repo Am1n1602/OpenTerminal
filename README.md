@@ -105,7 +105,8 @@ No paid API, no keys, and no single point of failure — every endpoint has a fa
 | Crypto quotes & board | CoinGecko | Binance public API |
 | Crypto candles | Binance public API (klines) | — |
 | Macro — India indexes (NIFTY 50 / NIFTY BANK / India VIX) | `jugaad-rpc`¹ (NSE, real‑time) | Yahoo Finance index quotes |
-| Macro — India (SENSEX) | Yahoo Finance index quote (BSE — outside jugaad‑rpc's NSE‑only scope) | — |
+| Macro — India (SENSEX) quote | TradingView scanner (direct‑ticker quote, BSE — outside jugaad‑rpc's NSE‑only scope) | Yahoo Finance index quote |
+| Macro — India (SENSEX) chart history | **no working source** — jugaad‑rpc is NSE‑only, Yahoo/Stooq don't carry it from every network; see [Roadmap](#-roadmap) | — |
 | Macro — US (Treasury yields, VIX) / EU (yields, ECB rate, HICP) | FRED (Federal Reserve) / ECB | — |
 | Economic calendar (schedule, forecast, previous — incl. RBI/India events) | Forex Factory public feed | — |
 | Economic calendar (actual — Fed / ECB / CPI / NFP only) | FRED (Federal Reserve) | — |
@@ -116,7 +117,7 @@ No paid API, no keys, and no single point of failure — every endpoint has a fa
 | Insider transactions — US | SEC EDGAR (Form 4) | — |
 | Insider transactions — NSE (best‑effort: general corporate announcements, not SEBI insider‑trading filings specifically) | `jugaad-rpc`¹ | — |
 
-¹ `jugaad-rpc` is this project's own companion NSE data service, run as the `jugaad-rpc` container in `docker-compose.yml` (`JUGAAD_RPC_URL` for a standalone `npm run dev`). **As of this commit its published image only implements live quotes** — the history/options/large‑deals/index‑snapshot/corporate‑announcements RPCs this app now calls exist in [jugaad-rs](https://github.com/Am1n1602/jugaad-rs)'s source but need a new image build+publish before they're live; until then those calls fail fast and fall back to Yahoo/TradingView exactly as if the container weren't running. See [Roadmap](#-roadmap).
+¹ `jugaad-rpc` is this project's own companion NSE data service, run as the `jugaad-rpc` container in `docker-compose.yml` (`JUGAAD_RPC_URL` for a standalone `npm run dev`), published from [jugaad-rs](https://github.com/Am1n1602/jugaad-rs) as `ghcr.io/am1n1602/jugaad-rpc` — confirmed live end‑to‑end (quotes, history, options, index snapshot, large deals, corporate announcements). If the container isn't running, every call above falls back to Yahoo/TradingView exactly the same as a genuine RPC failure.
 
 > ⚠️ These are public endpoints, not officially licensed data feeds — treat prices as delayed/indicative, not execution‑grade. See [`server/src/providers/`](server/src/providers) — each provider is a small, isolated module, so swapping or adding a data source is a 30‑minute job.
 
@@ -199,8 +200,8 @@ Run tests with `npm test` (Vitest, no network calls). CI runs on every push — 
 ## 🗺️ Roadmap
 
 **India data layer**
-- [x] NSE quotes, history, index options (NIFTY/BANKNIFTY/FINNIFTY), full option‑expiry listing, index snapshot (NIFTY 50/NIFTY BANK/India VIX), bulk/short/block deals and corporate announcements, all wired up to call [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs) — this app's code and the RPCs it needs both exist now (`GetOptionExpiries` added in Phase 3, reusing jugaad-core's already‑live‑verified `option-chain-contract-info` parsing rather than guessing at new NSE behavior)
-- [ ] **Blocked**: publish a new `jugaad-rpc` image build so those RPCs are actually live — the running container still only serves `GetStockQuote`/`WatchStockQuote` until then (see the data‑source table's footnote)
+- [x] NSE quotes, history, index options (NIFTY/BANKNIFTY/FINNIFTY), full option‑expiry listing, index snapshot (NIFTY 50/NIFTY BANK/India VIX), bulk/short/block deals and corporate announcements, all wired up to call [`jugaad-rpc`](https://github.com/Am1n1602/jugaad-rs) and confirmed live (`GetOptionExpiries` added in Phase 3, reusing jugaad-core's already‑live‑verified `option-chain-contract-info` parsing rather than guessing at new NSE behavior)
+- [ ] **SENSEX chart history** — no working source. jugaad‑rpc's scope is NSE‑only (SENSEX is BSE's own index) and Yahoo/Stooq don't carry it from every network; the quote still resolves via TradingView's scanner (direct‑ticker mode) independent of Yahoo. Two real paths forward if this is worth picking up: reverse‑engineer TradingView's unofficial WebSocket chart‑session protocol (unverified, needs live iteration), or add a proper BSE module to jugaad‑rs the same way NSE modules were built (bigger cross‑repo effort, also needs live endpoint verification)
 - [ ] SEBI insider‑trading‑disclosure‑specific endpoint (the Insider widget's NSE data is general corporate announcements today, not that specifically — needs a confirmed NSE endpoint first, per jugaad‑rs's own verify‑live‑before‑coding discipline)
 - [ ] RBI G‑Sec yield curve for the Macro widget — researched (RBI's DBIE portal, data.rbi.org.in/DBIE, looks like the best free lead, similar in spirit to FRED for the US) but not verified: this environment's network policy blocks egress to data.rbi.org.in outright, so whether it has a clean CSV/JSON endpoint (vs. only an interactive portal) needs checking from a normal connection before building against it
 - [ ] NSE‑equivalent of forecast‑vs‑actual earnings history

@@ -384,6 +384,16 @@ marketRouter.get("/history/:symbol", async (req, res) => {
     if (!Array.isArray(data) || data.length === 0) throw new Error("empty history from all providers");
     res.json(data);
   } catch (err) {
+    // SENSEX is a known, permanent gap rather than a transient outage:
+    // jugaad-rpc's scope is NSE-only (SENSEX is BSE's own index), and no
+    // other integrated source carries its historical bars — worth telling
+    // the user that directly instead of the generic "try again shortly",
+    // which implies a retry would help when it won't.
+    if (symbol === "^BSESN") {
+      return res.status(404).json({
+        error: "SENSEX chart history isn't available yet — no integrated data source covers BSE index history (quote data still works via TradingView).",
+      });
+    }
     fail(req, res, err);
   }
 });
